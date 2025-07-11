@@ -6,7 +6,10 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts"
+    "dev": "ts-node src/index.ts",
+    "demo": "ts-node src/complete-demo.ts",
+    "test": "node src/test-demo.js",
+    "final": "node src/final-demo.js"
   },
   "keywords": ["bitcoin", "transaction", "signing", "cryptography", "typescript"],
   "author": "Cryptography Professor",
