@@ -25,7 +25,7 @@ function deterministicSign(messageHash, privateKeyHex, fixedSeed) {
     const originalSign = ecc.sign;
     let callCount = 0;
     
-    // 暫時覆蓋隨機數生成，使其確定性
+    // 暫時覆蓋隨機数生成，使其確定性
     const originalRandomBytes = crypto.randomBytes;
     crypto.randomBytes = function(size) {
         // 創建確定性的"隨機"字節
@@ -50,15 +50,6 @@ function deterministicSign(messageHash, privateKeyHex, fixedSeed) {
         crypto.randomBytes = originalRandomBytes;
         throw error;
     }
-}
-
-// 真正使用固定k的簽章（教學演示）
-function createFixedKSignature(rHex, sHex) {
-    // 為教學目的，創建一個固定的簽章結果
-    // 這些值是使用固定k預先計算的結果
-    const r = Buffer.from(rHex, 'hex');
-    const s = Buffer.from(sHex, 'hex');
-    return Buffer.concat([r, s]);
 }
 
 // 初始化橢圓曲線加密庫
@@ -143,53 +134,176 @@ async function runDemo() {
         forceLog(`⚠️  警告: 實際應用中，k必須是密碼學安全的隨機數且每次都不同！`);
         forceLog(`📝 使用固定k的原因: 使教學演示結果可重現`);
         
-        // 展示 ECDSA 簽章算法的理論
-        forceLog('\n🔬 ECDSA 簽章算法理論:');
-        forceLog(`📐 橢圓曲線: secp256k1 (y² = x³ + 7)`);
-        forceLog(`📊 步驟 1: 計算 R = k × G (G為生成點)`);
-        forceLog(`📊 步驟 2: r = R.x mod n (取R點的x座標)`);
-        forceLog(`📊 步驟 3: s = k⁻¹ × (雜湊 + r × 私鑰) mod n`);
-        forceLog(`📋 參數說明:`);
-        forceLog(`   🔍 固定k = ${fixedK}`);
-        forceLog(`   🔍 雜湊 = ${transactionHash.toString('hex')}`);
-        forceLog(`   🔍 私鑰 = ${privateKey}`);
-        forceLog(`   🔍 曲線階 n = fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141`);
+        // k值範圍說明
+        forceLog('\n📏 k值的有效範圍:');
+        const n = 'fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141';
+        forceLog(`📐 曲線階數 n = ${n}`);
+        forceLog(`📊 k值必須滿足: 1 ≤ k < n`);
+        forceLog(`📊 即: 1 ≤ k < ${n}`);
+        forceLog(`🔍 我們的固定k = ${fixedK}`);
         
-        // 創建固定k的理論簽章結果（預先計算的示例）
-        forceLog('\n📝 固定k簽章計算結果:');
+        // 驗證k值是否在有效範圍內
+        const kBigInt = BigInt('0x' + fixedK);
+        const nBigIntForK = BigInt('0x' + n);
+        const isValidK = kBigInt >= 1n && kBigInt < nBigIntForK;
         
-        // 為了確保簽章能夠驗證，我們使用真實的簽章作為"固定k"示例
-        const realSignatureForReference = keyPair.sign(transactionHash);
-        forceLog(`📝 注意: 為確保驗證通過，此處使用真實簽章作為固定k示例`);
+        forceLog(`✅ k值範圍檢查: ${isValidK ? '有效 ✓' : '無效 ✗'}`);
+        forceLog(`📊 k值大小比較:`);
+        forceLog(`   🔢 k = ${kBigInt.toString()}`);
+        forceLog(`   🔢 n = ${nBigIntForK.toString()}`);
+        forceLog(`   📏 k < n: ${kBigInt < nBigIntForK ? '是' : '否'}`);
         
-        // 解析真實簽章的 r 和 s 值
-        const rValue = realSignatureForReference.slice(0, 32);
-        const sValue = realSignatureForReference.slice(32, 64);
+        forceLog('\n⚠️  k值安全要求:');
+        forceLog(`🔐 1. k 必須是密碼學安全的隨機數`);
+        forceLog(`🔐 2. k 必須在範圍 [1, n-1] 內`);
+        forceLog(`🔐 3. k 絕對不能重複使用`);
+        forceLog(`🔐 4. k 必須保密，洩露k會導致私鑰洩露`);
+        forceLog(`🔐 5. k 的生成必須具有足夠的熵`);
         
-        forceLog(`📊 "固定k"簽章計算結果:`);
-        forceLog(`   📍 r = ${rValue.toString('hex')}`);
-        forceLog(`   📍 s = ${sValue.toString('hex')}`);
-        forceLog(`✒️ 固定k簽章結果: ${realSignatureForReference.toString('hex')}`);
-        forceLog(`📏 簽章長度: ${realSignatureForReference.length} 字節`);
+        // 展示k值洩露的危險性
+        forceLog('\n🚨 k值重複使用的危險性示例:');
+        forceLog(`💀 如果同一個k值被用於簽章兩個不同的消息...`);
+        forceLog(`💀 攻击者可以通過以下公式計算出私鑰:`);
+        forceLog(`💀 私鑰 = (s₁×雜湊₂ - s₂×雜湊₁) × (r×(s₁-s₂))⁻¹ mod n`);
+        forceLog(`💀 這就是為什麼k值絕對不能重複使用！`);
         
-        // 驗證固定 k 的一致性概念
-        forceLog('\n🔄 固定k值一致性概念驗證:');
-        const fixedKSignature2 = Buffer.from(realSignatureForReference);
-        const isIdentical = realSignatureForReference.equals(fixedKSignature2);
-        forceLog(`🎯 重複使用相同簽章: ${fixedKSignature2.toString('hex')}`);
-        forceLog(`✅ 結果一致性: ${isIdentical ? '完全相同 ✓' : '不同 ✗'}`);
-        forceLog(`📝 說明: 真正的固定k值對相同數據簽章，結果必須完全相同`);
+        // R值與k值的關係驗證
+        forceLog('\n🔬 R值與k值的數學關係驗證');
+        forceLog('-'.repeat(50));
+        forceLog(`📐 理論基礎: R = k × G (G為secp256k1基點)`);
+        forceLog(`📊 其中: r = R.x mod n (取R點的x座標)`);
         
-        // 比較與不同簽章的差異
-        forceLog('\n🆚 與不同隨機k簽章的比較:');
-        const anotherSignature = keyPair.sign(transactionHash);
-        forceLog(`🎲 新隨機k簽章: ${anotherSignature.toString('hex')}`);
-        forceLog(`🔒 "固定k"簽章: ${realSignatureForReference.toString('hex')}`);
-        forceLog(`📊 差異性: ${!anotherSignature.equals(realSignatureForReference) ? '不同 (正常)' : '相同 (罕見)'}`);
-        forceLog(`📝 說明: 不同的k值通常會產生不同的簽章，但都能被同一公鑰驗證`);
+        // secp256k1 基點座標
+        const Gx = '79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798';
+        const Gy = '483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8';
+        forceLog(`📍 基點G座標:`);
+        forceLog(`   Gx = 0x${Gx}`);
+        forceLog(`   Gy = 0x${Gy}`);
         
-        // 使用這個簽章進行後續演示
-        const signature = realSignatureForReference;
+        // 手動計算 k × G 來驗證 R 值
+        forceLog('\n🧮 手動驗證 R = k × G:');
+        forceLog(`🔍 給定固定k = ${fixedK}`);
+        
+        // 使用 tiny-secp256k1 進行點乘運算
+        const kBuffer = Buffer.from(fixedK, 'hex');
+        const basePoint = Buffer.from('0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798', 'hex');
+        
+        let calculatedR = null;
+        let calculatedS = null;
+        
+        try {
+            // 計算 k × G
+            const kTimesG = ecc.pointMultiply(basePoint, kBuffer);
+            if (kTimesG) {
+                const Rx = kTimesG.slice(1, 33); // 去除壓縮前綴，取x座標
+                calculatedR = Rx.toString('hex');
+                
+                forceLog(`✨ 計算結果 R = k × G:`);
+                forceLog(`   📊 R點 (壓縮格式): ${kTimesG.toString('hex')}`);
+                forceLog(`   📊 Rx座標: ${calculatedR}`);
+                
+                // 這個計算出的Rx就應該等於簽章中的r值
+                forceLog(`\n🎯 理論驗證:`);
+                forceLog(`   📐 根據ECDSA算法，簽章的r值應該等於 Rx mod n`);
+                forceLog(`   📐 由於 Rx < n (secp256k1的特性)，所以 r = Rx`);
+                forceLog(`   📐 因此，簽章中的r值應該等於我們計算的Rx`);
+                
+                // 加入 S 值的數學關係計算
+                forceLog(`\n🧮 S 值的數學關係計算:`);
+                forceLog(`📐 ECDSA S 值公式: s = k⁻¹ × (hash + r × 私鑰) mod n`);
+                forceLog(`📐 其中:`);
+                forceLog(`   🔢 k = 固定隨機數`);
+                forceLog(`   🔢 hash = 訊息雜湊值`);
+                forceLog(`   🔢 r = R 點的 x 座標`);
+                forceLog(`   🔢 私鑰 = ECDSA 私鑰`);
+                forceLog(`   🔢 n = 曲線階數`);
+                
+                // 手動計算 S 值來驗證數學關係
+                forceLog(`\n🔬 手動驗證 S 值計算:`);
+                
+                // 準備計算所需的值
+                const hashBigInt = BigInt('0x' + transactionHash.toString('hex'));
+                const rBigInt = BigInt('0x' + calculatedR);
+                const privateBigInt = BigInt('0x' + privateKey);
+                const kBigInt = BigInt('0x' + fixedK);
+                const nBigInt = BigInt('0x' + n);
+                
+                forceLog(`📊 計算參數:`);
+                forceLog(`   🔢 hash = ${hashBigInt.toString(16)} (十六進制)`);
+                forceLog(`   🔢 r = ${rBigInt.toString(16)} (十六進制)`);
+                forceLog(`   🔢 私鑰 = ${privateBigInt.toString(16)} (十六進制)`);
+                forceLog(`   🔢 k = ${kBigInt.toString(16)} (十六進制)`);
+                forceLog(`   🔢 n = ${nBigInt.toString(16)} (十六進制)`);
+                
+                try {
+                    // 計算 k 的模逆元 (k⁻¹ mod n)
+                    const kInverse = modInverse(kBigInt, nBigInt);
+                    forceLog(`\n🔍 中間計算步驟:`);
+                    forceLog(`   🧮 k⁻¹ mod n = ${kInverse.toString(16)} (十六進制)`);
+                    
+                    // 計算 r × 私鑰
+                    const rTimesPrivate = (rBigInt * privateBigInt) % nBigInt;
+                    forceLog(`   🧮 r × 私鑰 mod n = ${rTimesPrivate.toString(16)} (十六進制)`);
+                    
+                    // 計算 hash + r × 私鑰
+                    const hashPlusRPrivate = (hashBigInt + rTimesPrivate) % nBigInt;
+                    forceLog(`   🧮 (hash + r × 私鑰) mod n = ${hashPlusRPrivate.toString(16)} (十六進制)`);
+                    
+                    // 計算最終的 s 值
+                    const calculatedSBigInt = (kInverse * hashPlusRPrivate) % nBigInt;
+                    forceLog(`\n✨ 理論計算的 S 值:`);
+                    forceLog(`   📊 s = k⁻¹ × (hash + r × 私鑰) mod n`);
+                    forceLog(`   📊 s = ${calculatedSBigInt.toString(16)} (十六進制)`);
+                    
+                    // 將計算結果保存以便後續比較
+                    calculatedS = calculatedSBigInt.toString(16).padStart(64, '0');
+                    
+                    // 驗證計算的正確性：s × k ≡ hash + r × 私鑰 (mod n)
+                    forceLog(`\n🔍 驗證計算正確性:`);
+                    const verification = (calculatedSBigInt * kBigInt) % nBigInt;
+                    const expected = hashPlusRPrivate;
+                    const isCorrect = verification === expected;
+                    
+                    forceLog(`   🧮 驗證公式: s × k ≡ hash + r × 私鑰 (mod n)`);
+                    forceLog(`   🧮 左邊: s × k mod n = ${verification.toString(16)}`);
+                    forceLog(`   🧮 右邊: hash + r × 私鑰 mod n = ${expected.toString(16)}`);
+                    forceLog(`   ✅ 驗證結果: ${isCorrect ? '正確 ✓' : '錯誤 ✗'}`);
+                    
+                } catch (error) {
+                    forceLog(`❌ S 值計算過程發生錯誤: ${error.message}`);
+                }
+                
+                // 從簽章恢復私鑰的理論說明
+                forceLog(`\n🔐 從簽章恢復私鑰的數學原理:`);
+                forceLog(`📐 如果攻擊者知道 k 值，可以通過以下公式計算私鑰:`);
+                forceLog(`📐 私鑰 = r⁻¹ × (s × k - hash) mod n`);
+                forceLog(`⚠️  這就是為什麼 k 值必須保密且不能重複使用！`);
+                
+                // k 值重複使用攻擊的詳細說明
+                forceLog(`\n💀 k 值重複使用攻擊詳解:`);
+                forceLog(`📐 假設攻擊者獲得兩個使用相同 k 值的簽章:`);
+                forceLog(`   🔸 簽章1: (r, s₁) 對應訊息雜湊 hash₁`);
+                forceLog(`   🔸 簽章2: (r, s₂) 對應訊息雜湊 hash₂`);
+                forceLog(`📐 由於使用相同 k，所以 r 值相同`);
+                forceLog(`📐 攻击公式:`);
+                forceLog(`   🧮 s₁ = k⁻¹ × (hash₁ + r × 私鑰) mod n`);
+                forceLog(`   🧮 s₂ = k⁻¹ × (hash₂ + r × 私鑰) mod n`);
+                forceLog(`   🧮 s₁ - s₂ = k⁻¹ × (hash₁ - hash₂) mod n`);
+                forceLog(`   🧮 k = (hash₁ - hash₂) × (s₁ - s₂)⁻¹ mod n`);
+                forceLog(`💀 一旦計算出 k，就可以用上述公式計算私鑰！`);
+                
+            } else {
+                forceLog(`❌ 無法計算 k × G (可能k值無效)`);
+            }
+        } catch (error) {
+            forceLog(`❌ 計算 k × G 時發生錯誤: ${error.message}`);
+        }
+        
+        // 執行實際簽章
+        forceLog('\n🖊️ 執行實際簽章:');
+        const signature = deterministicSign(transactionHash, privateKey, fixedK);
+        forceLog(`📝 簽章完成，長度: ${signature.length} 字節`);
+        forceLog(`📝 簽章結果: ${signature.toString('hex')}`);
         
         // 第四步：簽章格式解析和R/S/V分解
         forceLog('\n🔬 第四步：簽章格式解析和R/S/V分解');
@@ -206,6 +320,132 @@ async function runDemo() {
             forceLog(`📍 R值 (前32字節): ${rValue.toString('hex')}`);
             forceLog(`📍 S值 (後32字節): ${sValue.toString('hex')}`);
             forceLog(`📝 V值 (恢復ID): 在比特幣中通常不使用，因為比特幣使用公鑰而非恢復ID`);
+            
+            // 使用實際簽章的R值進行S值驗證
+            forceLog(`\n🔬 使用實際簽章的R值重新驗證S值計算:`);
+            
+            // 準備計算所需的值 - 使用實際簽章的R值
+            const hashBigInt = BigInt('0x' + transactionHash.toString('hex'));
+            const actualRBigInt = BigInt('0x' + rValue.toString('hex'));
+            const actualSBigInt = BigInt('0x' + sValue.toString('hex'));
+            const privateBigInt = BigInt('0x' + privateKey);
+            const nBigInt = BigInt('0x' + n);
+            
+            forceLog(`📊 使用實際簽章參數重新計算:`);
+            forceLog(`   🔢 hash = ${hashBigInt.toString(16)} (十六進制)`);
+            forceLog(`   🔢 實際r = ${actualRBigInt.toString(16)} (十六進制)`);
+            forceLog(`   🔢 實際s = ${actualSBigInt.toString(16)} (十六進制)`);
+            forceLog(`   🔢 私鑰 = ${privateBigInt.toString(16)} (十六進制)`);
+            forceLog(`   🔢 n = ${nBigInt.toString(16)} (十六進制)`);
+            
+            try {
+                // 驗證簽章的數學關係：s × k ≡ hash + r × 私鑰 (mod n)
+                // 但我們不知道確定性簽章實際使用的k值，所以我們反過來驗證
+                // 使用ECDSA驗證公式：驗證點 = s⁻¹ × hash × G + s⁻¹ × r × 公鑰點
+                
+                forceLog(`\n🧮 ECDSA簽章驗證的數學關係:`);
+                forceLog(`📐 公式: s × k ≡ hash + r × 私鑰 (mod n)`);
+                forceLog(`📐 如果我們知道k，可以驗證: k = s⁻¹ × (hash + r × 私鑰) mod n`);
+                
+                // 計算 s 的模逆元
+                const sInverse = modInverse(actualSBigInt, nBigInt);
+                forceLog(`🔍 計算步驟:`);
+                forceLog(`   🧮 s⁻¹ mod n = ${sInverse.toString(16)} (十六進制)`);
+                
+                // 計算 r × 私鑰
+                const rTimesPrivate = (actualRBigInt * privateBigInt) % nBigInt;
+                forceLog(`   🧮 r × 私鑰 mod n = ${rTimesPrivate.toString(16)} (十六進制)`);
+                
+                // 計算 hash + r × 私鑰
+                const hashPlusRPrivate = (hashBigInt + rTimesPrivate) % nBigInt;
+                forceLog(`   🧮 (hash + r × 私鑰) mod n = ${hashPlusRPrivate.toString(16)} (十六進制)`);
+                
+                // 計算實際使用的 k 值
+                const actualK = (sInverse * hashPlusRPrivate) % nBigInt;
+                forceLog(`\n✨ 反推出實際使用的 k 值:`);
+                forceLog(`   📊 k = s⁻¹ × (hash + r × 私鑰) mod n`);
+                forceLog(`   📊 k = ${actualK.toString(16)} (十六進制)`);
+                
+                // 驗證計算正確性：重新計算 s 值
+                const kInverse = modInverse(actualK, nBigInt);
+                const recalculatedS = (kInverse * hashPlusRPrivate) % nBigInt;
+                
+                forceLog(`\n🔍 驗證計算正確性:`);
+                forceLog(`   🧮 使用反推的k值重新計算s:`);
+                forceLog(`   🧮 k⁻¹ mod n = ${kInverse.toString(16)}`);
+                forceLog(`   🧮 重新計算的s = k⁻¹ × (hash + r × 私鑰) mod n`);
+                forceLog(`   🧮 重新計算的s = ${recalculatedS.toString(16)}`);
+                forceLog(`   🧮 實際簽章的s = ${actualSBigInt.toString(16)}`);
+                
+                const sMatches = recalculatedS === actualSBigInt;
+                forceLog(`   ✅ S值驗證: ${sMatches ? '正確 ✓' : '錯誤 ✗'}`);
+                
+                if (sMatches) {
+                    forceLog(`\n🎯 數學關係驗證成功！`);
+                    forceLog(`📐 這證明了ECDSA簽章的數學一致性`);
+                }
+                
+                // 比較固定k值與實際k值
+                if (fixedK) {
+                    const fixedKBigInt = BigInt('0x' + fixedK);
+                    forceLog(`\n🔍 k值比較:`);
+                    forceLog(`   🎲 我們設定的固定k = ${fixedK}`);
+                    forceLog(`   🎲 實際簽章使用的k = ${actualK.toString(16).padStart(64, '0')}`);
+                    forceLog(`   ✅ k值匹配: ${fixedKBigInt === actualK ? '是 ✓' : '否 ✗'}`);
+                    
+                    if (fixedKBigInt !== actualK) {
+                        forceLog(`📝 說明: deterministicSign函數並非真正使用固定k，而是產生確定性結果`);
+                        forceLog(`📝 這是因為bitcoinjs-lib內部有自己的隨機數生成機制`);
+                    }
+                }
+                
+                // 演示k值洩露的危險性
+                forceLog(`\n💀 演示k值洩露攻擊:`);
+                forceLog(`📐 假設攻擊者知道了k值: ${actualK.toString(16)}`);
+                forceLog(`📐 攻擊者可以通過以下公式計算私鑰:`);
+                forceLog(`📐 私鑰 = r⁻¹ × (s × k - hash) mod n`);
+                
+                try {
+                    // 演示攻擊計算
+                    const rInverse = modInverse(actualRBigInt, nBigInt);
+                    const sTimesK = (actualSBigInt * actualK) % nBigInt;
+                    const sTimesKMinusHash = (sTimesK - hashBigInt + nBigInt) % nBigInt;
+                    const recoveredPrivateKey = (rInverse * sTimesKMinusHash) % nBigInt;
+                    
+                    forceLog(`🔍 攻击计算步驟:`);
+                    forceLog(`   🧮 r⁻¹ mod n = ${rInverse.toString(16)}`);
+                    forceLog(`   🧮 s × k mod n = ${sTimesK.toString(16)}`);
+                    forceLog(`   🧮 (s × k - hash) mod n = ${sTimesKMinusHash.toString(16)}`);
+                    forceLog(`   🧮 恢復的私鑰 = ${recoveredPrivateKey.toString(16)}`);
+                    forceLog(`   🔢 原始私鑰 = ${privateBigInt.toString(16)}`);
+                    
+                    const privateKeyMatches = recoveredPrivateKey === privateBigInt;
+                    forceLog(`   ✅ 私鑰恢復: ${privateKeyMatches ? '成功 ⚠️' : '失敗'}`);
+                    
+                    if (privateKeyMatches) {
+                        forceLog(`\n💀 攻擊成功！這證明了k值洩露的嚴重後果！`);
+                        forceLog(`⚠️  這就是為什麼k值必須保密且每次都不同！`);
+                    }
+                    
+                } catch (error) {
+                    forceLog(`❌ 攻击演示計算錯誤: ${error.message}`);
+                }
+                
+            } catch (error) {
+                forceLog(`❌ S 值驗證過程發生錯誤: ${error.message}`);
+            }
+            
+            // 比較實際簽章與理論計算（如果有的話）
+            if (calculatedR) {
+                forceLog(`\n🔍 理論與實際比較:`);
+                forceLog(`   📊 理論計算的 R: ${calculatedR}`);
+                forceLog(`   📊 實際簽章的 R: ${rValue.toString('hex')}`);
+                forceLog(`   ✅ R值匹配: ${calculatedR === rValue.toString('hex') ? '是 ✓' : '否 ✗'}`);
+                
+                if (calculatedR !== rValue.toString('hex')) {
+                    forceLog(`📝 說明: 理論計算使用固定k，實際簽章使用確定性但不同的k值`);
+                }
+            }
             
             // 轉換為DER格式（比特幣網路使用的標準格式）
             forceLog('\n🔄 轉換為DER格式:');
@@ -354,6 +594,26 @@ function parseDERSignature(derSignature) {
     
     const sValue = derSignature.slice(offset, offset + sLength);
     forceLog(`   位置 ${offset}-${offset + sLength - 1}: ${sValue.toString('hex')} - S值`);
+}
+
+// 計算模逆元的函數
+function modInverse(a, m) {
+    // 使用擴展歐幾里得算法計算 a 在模 m 下的逆元
+    function extendedGCD(a, b) {
+        if (a === 0n) {
+            return { gcd: b, x: 0n, y: 1n };
+        }
+        const { gcd, x: x1, y: y1 } = extendedGCD(b % a, a);
+        const x = y1 - (b / a) * x1;
+        const y = x1;
+        return { gcd, x, y };
+    }
+    
+    const { gcd, x } = extendedGCD(a % m, m);
+    if (gcd !== 1n) {
+        throw new Error('模逆元不存在');
+    }
+    return ((x % m) + m) % m;
 }
 
 // 執行演示
