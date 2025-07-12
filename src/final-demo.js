@@ -186,117 +186,111 @@ async function runDemo() {
         
         // 使用 tiny-secp256k1 進行點乘運算
         const kBuffer = Buffer.from(fixedK, 'hex');
-        const basePoint = Buffer.from('0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798', 'hex');
         
         let calculatedR = null;
         let calculatedS = null;
         
         try {
-            // 計算 k × G
-            const kTimesG = ecc.pointMultiply(basePoint, kBuffer);
-            if (kTimesG) {
-                const Rx = kTimesG.slice(1, 33); // 去除壓縮前綴，取x座標
-                calculatedR = Rx.toString('hex');
+            // 檢查 k 值是否有效（必須在 1 到 n-1 範圍內）
+            const kBigInt = BigInt('0x' + fixedK);
+            const nBigInt = BigInt('0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141');
+            
+            if (kBigInt <= 0n || kBigInt >= nBigInt) {
+                throw new Error('k 值超出有效範圍');
+            }
+            
+            // 方法1：使用 bitcoinjs-lib 的內建功能來計算 k×G
+            try {
+                // 創建一個臨時的密鑰對來計算 k×G
+                const tempKeyPair = ECPair.fromPrivateKey(kBuffer);
+                const kTimesG = tempKeyPair.publicKey;
                 
-                forceLog(`✨ 計算結果 R = k × G:`);
-                forceLog(`   📊 R點 (壓縮格式): ${kTimesG.toString('hex')}`);
+                forceLog(`✨ 計算結果 R = k × G (方法1 - 使用ECPair):`);
+                forceLog(`   📊 R點 (完整格式): ${kTimesG.toString('hex')}`);
+                
+                // 提取 x 座標（去除壓縮前綴 0x02 或 0x03）
+                const Rx = kTimesG.slice(1, 33);
+                calculatedR = Rx.toString('hex');
                 forceLog(`   📊 Rx座標: ${calculatedR}`);
                 
-                // 這個計算出的Rx就應該等於簽章中的r值
-                forceLog(`\n🎯 理論驗證:`);
-                forceLog(`   📐 根據ECDSA算法，簽章的r值應該等於 Rx mod n`);
-                forceLog(`   📐 由於 Rx < n (secp256k1的特性)，所以 r = Rx`);
-                forceLog(`   📐 因此，簽章中的r值應該等於我們計算的Rx`);
+            } catch (error) {
+                forceLog(`❌ 方法1失敗: ${error.message}`);
                 
-                // 加入 S 值的數學關係計算
-                forceLog(`\n🧮 S 值的數學關係計算:`);
-                forceLog(`📐 ECDSA S 值公式: s = k⁻¹ × (hash + r × 私鑰) mod n`);
-                forceLog(`📐 其中:`);
-                forceLog(`   🔢 k = 固定隨機數`);
-                forceLog(`   🔢 hash = 訊息雜湊值`);
-                forceLog(`   🔢 r = R 點的 x 座標`);
-                forceLog(`   🔢 私鑰 = ECDSA 私鑰`);
-                forceLog(`   🔢 n = 曲線階數`);
-                
-                // 手動計算 S 值來驗證數學關係
-                forceLog(`\n🔬 手動驗證 S 值計算:`);
-                
-                // 準備計算所需的值
-                const hashBigInt = BigInt('0x' + transactionHash.toString('hex'));
-                const rBigInt = BigInt('0x' + calculatedR);
-                const privateBigInt = BigInt('0x' + privateKey);
-                const kBigInt = BigInt('0x' + fixedK);
-                const nBigInt = BigInt('0x' + n);
-                
-                forceLog(`📊 計算參數:`);
-                forceLog(`   🔢 hash = ${hashBigInt.toString(16)} (十六進制)`);
-                forceLog(`   🔢 r = ${rBigInt.toString(16)} (十六進制)`);
-                forceLog(`   🔢 私鑰 = ${privateBigInt.toString(16)} (十六進制)`);
-                forceLog(`   🔢 k = ${kBigInt.toString(16)} (十六進制)`);
-                forceLog(`   🔢 n = ${nBigInt.toString(16)} (十六進制)`);
-                
+                // 方法2：直接使用 tiny-secp256k1 的 pointMultiply
                 try {
-                    // 計算 k 的模逆元 (k⁻¹ mod n)
-                    const kInverse = modInverse(kBigInt, nBigInt);
-                    forceLog(`\n🔍 中間計算步驟:`);
-                    forceLog(`   🧮 k⁻¹ mod n = ${kInverse.toString(16)} (十六進制)`);
+                    // secp256k1 的基點 G（未壓縮格式）
+                    const basePointUncompressed = Buffer.from(
+                        '0479BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798' +
+                        '483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8', 
+                        'hex'
+                    );
                     
-                    // 計算 r × 私鑰
-                    const rTimesPrivate = (rBigInt * privateBigInt) % nBigInt;
-                    forceLog(`   🧮 r × 私鑰 mod n = ${rTimesPrivate.toString(16)} (十六進制)`);
+                    // 使用 pointMultiply 計算 k × G
+                    const kTimesG = ecc.pointMultiply(basePointUncompressed, kBuffer);
                     
-                    // 計算 hash + r × 私鑰
-                    const hashPlusRPrivate = (hashBigInt + rTimesPrivate) % nBigInt;
-                    forceLog(`   🧮 (hash + r × 私鑰) mod n = ${hashPlusRPrivate.toString(16)} (十六進制)`);
+                    if (kTimesG && kTimesG.length >= 33) {
+                        forceLog(`✨ 計算結果 R = k × G (方法2 - 直接pointMultiply):`);
+                        forceLog(`   📊 R點: ${kTimesG.toString('hex')}`);
+                        
+                        // 提取 x 座標
+                        let Rx;
+                        if (kTimesG.length === 33) {
+                            // 壓縮格式
+                            Rx = kTimesG.slice(1, 33);
+                        } else if (kTimesG.length === 65) {
+                            // 未壓縮格式
+                            Rx = kTimesG.slice(1, 33);
+                        } else {
+                            throw new Error(`意外的點格式長度: ${kTimesG.length}`);
+                        }
+                        
+                        calculatedR = Rx.toString('hex');
+                        forceLog(`   📊 Rx座標: ${calculatedR}`);
+                        
+                    } else {
+                        throw new Error('pointMultiply 返回無效結果');
+                    }
                     
-                    // 計算最終的 s 值
-                    const calculatedSBigInt = (kInverse * hashPlusRPrivate) % nBigInt;
-                    forceLog(`\n✨ 理論計算的 S 值:`);
-                    forceLog(`   📊 s = k⁻¹ × (hash + r × 私鑰) mod n`);
-                    forceLog(`   📊 s = ${calculatedSBigInt.toString(16)} (十六進制)`);
+                } catch (error2) {
+                    forceLog(`❌ 方法2也失敗: ${error2.message}`);
                     
-                    // 將計算結果保存以便後續比較
-                    calculatedS = calculatedSBigInt.toString(16).padStart(64, '0');
-                    
-                    // 驗證計算的正確性：s × k ≡ hash + r × 私鑰 (mod n)
-                    forceLog(`\n🔍 驗證計算正確性:`);
-                    const verification = (calculatedSBigInt * kBigInt) % nBigInt;
-                    const expected = hashPlusRPrivate;
-                    const isCorrect = verification === expected;
-                    
-                    forceLog(`   🧮 驗證公式: s × k ≡ hash + r × 私鑰 (mod n)`);
-                    forceLog(`   🧮 左邊: s × k mod n = ${verification.toString(16)}`);
-                    forceLog(`   🧮 右邊: hash + r × 私鑰 mod n = ${expected.toString(16)}`);
-                    forceLog(`   ✅ 驗證結果: ${isCorrect ? '正確 ✓' : '錯誤 ✗'}`);
-                    
-                } catch (error) {
-                    forceLog(`❌ S 值計算過程發生錯誤: ${error.message}`);
+                    // 方法3：手動實現點乘法（教學用途）
+                    try {
+                        forceLog(`🔧 嘗試方法3 - 理論計算說明:`);
+                        forceLog(`📐 由於點乘法計算複雜，我們改為解釋理論:`);
+                        forceLog(`📐 R = k × G 其中:`);
+                        forceLog(`   🔢 k = ${fixedK} (我們的固定隨機數)`);
+                        forceLog(`   📍 G = (0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798,`);
+                        forceLog(`           0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8)`);
+                        forceLog(`📐 實際的 k×G 計算需要進行橢圓曲線點乘法運算`);
+                        forceLog(`📐 這涉及到有限域上的複雜數學運算`);
+                        
+                        // 至少我們可以說明為什麼會失敗
+                        forceLog(`\n💡 計算失敗的可能原因:`);
+                        forceLog(`   1️⃣ tiny-secp256k1 版本兼容性問題`);
+                        forceLog(`   2️⃣ pointMultiply 函數參數格式問題`);
+                        forceLog(`   3️⃣ k 值格式或範圍問題`);
+                        forceLog(`   4️⃣ 基點 G 的格式問題（壓縮 vs 未壓縮）`);
+                        
+                        // 我們可以改為驗證實際簽章中的 R 值
+                        calculatedR = '預期在實際簽章中驗證';
+                        
+                    } catch (error3) {
+                        forceLog(`❌ 所有方法都失敗了: ${error3.message}`);
+                        calculatedR = null;
+                    }
                 }
-                
-                // 從簽章恢復私鑰的理論說明
-                forceLog(`\n🔐 從簽章恢復私鑰的數學原理:`);
-                forceLog(`📐 如果攻擊者知道 k 值，可以通過以下公式計算私鑰:`);
-                forceLog(`📐 私鑰 = r⁻¹ × (s × k - hash) mod n`);
-                forceLog(`⚠️  這就是為什麼 k 值必須保密且不能重複使用！`);
-                
-                // k 值重複使用攻擊的詳細說明
-                forceLog(`\n💀 k 值重複使用攻擊詳解:`);
-                forceLog(`📐 假設攻擊者獲得兩個使用相同 k 值的簽章:`);
-                forceLog(`   🔸 簽章1: (r, s₁) 對應訊息雜湊 hash₁`);
-                forceLog(`   🔸 簽章2: (r, s₂) 對應訊息雜湊 hash₂`);
-                forceLog(`📐 由於使用相同 k，所以 r 值相同`);
-                forceLog(`📐 攻击公式:`);
-                forceLog(`   🧮 s₁ = k⁻¹ × (hash₁ + r × 私鑰) mod n`);
-                forceLog(`   🧮 s₂ = k⁻¹ × (hash₂ + r × 私鑰) mod n`);
-                forceLog(`   🧮 s₁ - s₂ = k⁻¹ × (hash₁ - hash₂) mod n`);
-                forceLog(`   🧮 k = (hash₁ - hash₂) × (s₁ - s₂)⁻¹ mod n`);
-                forceLog(`💀 一旦計算出 k，就可以用上述公式計算私鑰！`);
-                
-            } else {
-                forceLog(`❌ 無法計算 k × G (可能k值無效)`);
             }
+            
         } catch (error) {
-            forceLog(`❌ 計算 k × G 時發生錯誤: ${error.message}`);
+            forceLog(`❌ k×G 計算過程發生錯誤: ${error.message}`);
+            forceLog(`📝 錯誤詳情: ${error.stack ? error.stack.split('\n')[0] : '無詳細信息'}`);
+            
+            // 提供替代方案
+            forceLog(`\n🔄 替代方案 - 理論解釋:`);
+            forceLog(`📐 雖然無法直接計算 k×G，但我們可以通過實際簽章來驗證關係`);
+            forceLog(`📐 在實際簽章中，r 值就是 (k×G).x，即 R 點的 x 座標`);
+            forceLog(`📐 我們將在後續步驟中從實際簽章提取 r 值來驗證`);
         }
         
         // 執行實際簽章
